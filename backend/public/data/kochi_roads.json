@@ -1,0 +1,187 @@
+[
+    {
+        "id": "NH66_North",
+        "type": "primary",
+        "name": "NH66 (Edappally-Palarivattom)",
+        "coordinates": [
+            [
+                10.0236,
+                76.3087
+            ],
+            [
+                10.0150,
+                76.3050
+            ],
+            [
+                10.0000,
+                76.3000
+            ]
+        ],
+        "connections": [
+            "NH66_Central",
+            "CivilLine_Rd",
+            "Palarivattom_Link"
+        ]
+    },
+    {
+        "id": "NH66_Central",
+        "type": "primary",
+        "name": "NH66 (Palarivattom-Vyttila)",
+        "coordinates": [
+            [
+                10.0000,
+                76.3000
+            ],
+            [
+                9.9850,
+                76.3100
+            ],
+            [
+                9.9658,
+                76.3182
+            ]
+        ],
+        "connections": [
+            "NH66_South",
+            "SA_Road",
+            "Vyttila_Hub",
+            "NH66_North"
+        ]
+    },
+    {
+        "id": "NH66_South",
+        "type": "primary",
+        "name": "NH66 (Vyttila-Kundannoor)",
+        "coordinates": [
+            [
+                9.9658,
+                76.3182
+            ],
+            [
+                9.9450,
+                76.3350
+            ]
+        ],
+        "connections": [
+            "NH66_Central",
+            "SA_Road"
+        ]
+    },
+    {
+        "id": "CivilLine_Rd",
+        "type": "secondary",
+        "name": "Civil Line Road",
+        "coordinates": [
+            [
+                10.0000,
+                76.3000
+            ],
+            [
+                10.0150,
+                76.3400
+            ]
+        ],
+        "connections": [
+            "Seaport_Airport",
+            "NH66_North"
+        ]
+    },
+    {
+        "id": "SA_Road",
+        "type": "secondary",
+        "name": "Sahodaran Ayyappan Rd",
+        "coordinates": [
+            [
+                9.9658,
+                76.3182
+            ],
+            [
+                9.9700,
+                76.2900
+            ]
+        ],
+        "connections": [
+            "NH66_Central",
+            "Kaloor_Link"
+        ]
+    },
+    {
+        "id": "Seaport_Airport",
+        "type": "secondary",
+        "name": "Seaport-Airport Rd",
+        "coordinates": [
+            [
+                10.0400,
+                76.3500
+            ],
+            [
+                10.0150,
+                76.3400
+            ],
+            [
+                9.9800,
+                76.3450
+            ]
+        ],
+        "connections": [
+            "CivilLine_Rd",
+            "Kakkanad_Link"
+        ]
+    },
+    {
+        "id": "Palarivattom_Link",
+        "type": "tertiary",
+        "name": "Palarivattom Link",
+        "coordinates": [
+            [
+                10.0000,
+                76.3000
+            ],
+            [
+                9.9950,
+                76.2950
+            ]
+        ],
+        "connections": [
+            "NH66_North",
+            "Kaloor_Link"
+        ]
+    },
+    {
+        "id": "Kaloor_Link",
+        "type": "tertiary",
+        "name": "Kaloor Link Rd",
+        "coordinates": [
+            [
+                9.9950,
+                76.2950
+            ],
+            [
+                9.9700,
+                76.2900
+            ]
+        ],
+        "connections": [
+            "Palarivattom_Link",
+            "SA_Road"
+        ]
+    },
+    {
+        "id": "Vyttila_Hub",
+        "type": "tertiary",
+        "name": "Mobility Hub Loop",
+        "coordinates": [
+            [
+                9.9658,
+                76.3182
+            ],
+            [
+                9.9600,
+                76.3200
+            ]
+        ],
+        "connections": [
+            "NH66_Central"
+        ]
+    }
+]

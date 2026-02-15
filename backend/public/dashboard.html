@@ -1,0 +1,803 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kochi Traffic Command Center | AI Orchestrator</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" />
+    <style>
+        :root {
+            --bg-dark: #050505;
+            --bg-panel: #111111;
+            --accent: #00bcd4;
+            --danger: #ff4444;
+            --success: #00C851;
+            --warning: #ffbb33;
+            --text-main: #e0e0e0;
+            --glow-pri: rgba(0, 188, 212, 0.4);
+        }
+
+        html,
+        body {
+            height: 100%;
+            width: 100%;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+        }
+
+        body {
+            font-family: 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-dark);
+            color: var(--text-main);
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* COMMAND BAR */
+        .cmd-bar {
+            height: 55px;
+            background: linear-gradient(180deg, #151515 0%, #050505 100%);
+            border-bottom: 1px solid #333;
+            display: flex;
+            align-items: center;
+            padding: 0 20px;
+            justify-content: space-between;
+            z-index: 2000;
+            flex-shrink: 0;
+        }
+
+        .brand {
+            font-weight: 700;
+            letter-spacing: 1px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .brand i {
+            color: var(--accent);
+        }
+
+        .sel-group {
+            display: flex;
+            background: #222;
+            border-radius: 4px;
+            padding: 2px;
+        }
+
+        .sel-btn {
+            background: transparent;
+            border: none;
+            color: #888;
+            padding: 5px 12px;
+            cursor: pointer;
+            font-size: 0.8em;
+            font-weight: 600;
+        }
+
+        .sel-btn:hover {
+            color: white;
+        }
+
+        .sel-btn.active {
+            background: var(--accent);
+            color: black;
+            box-shadow: 0 0 8px var(--glow-pri);
+        }
+
+        /* CONTROL PANEL */
+        .ctrl-panel {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin-right: 20px;
+        }
+
+        .ctrl-btn {
+            background: #222;
+            border: 1px solid #333;
+            color: #ccc;
+            padding: 4px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.75em;
+            display: flex;
+            gap: 5px;
+            align-items: center;
+        }
+
+        .ctrl-btn:hover {
+            background: #333;
+            color: white;
+        }
+
+        .ctrl-btn.active {
+            background: var(--accent);
+            color: black;
+            border-color: var(--accent);
+        }
+
+        .ctrl-btn.emergency {
+            border-color: var(--danger);
+            color: var(--danger);
+        }
+
+        .ctrl-btn.emergency.active {
+            background: var(--danger);
+            color: white;
+        }
+
+        .stats {
+            display: flex;
+            gap: 20px;
+            font-size: 0.8em;
+        }
+
+        .stat-box {
+            text-align: center;
+        }
+
+        .stat-val {
+            font-weight: bold;
+            font-size: 1.1em;
+            color: white;
+        }
+
+        .stat-lbl {
+            font-size: 0.7em;
+            color: #666;
+        }
+
+        /* WORKSPACE */
+        .workspace {
+            flex: 1;
+            display: flex;
+            position: relative;
+            height: calc(100% - 55px);
+        }
+
+        .map-container {
+            flex: 1;
+            background: #000;
+            position: relative;
+            height: 100%;
+        }
+
+        #map {
+            width: 100%;
+            height: 100%;
+            background: #080808;
+            z-index: 1;
+        }
+
+        /* INTEL PANEL */
+        .intel-panel {
+            width: 360px;
+            background: var(--bg-panel);
+            border-left: 1px solid #333;
+            display: flex;
+            flex-direction: column;
+            z-index: 1510;
+            box-shadow: -5px 0 20px rgba(0, 0, 0, 0.5);
+        }
+
+        .header {
+            padding: 15px;
+            border-bottom: 1px solid #333;
+            background: #151515;
+        }
+
+        .h-title {
+            font-size: 1.1em;
+            font-weight: 300;
+            margin-bottom: 5px;
+        }
+
+        .h-sub {
+            font-size: 0.75em;
+            color: var(--accent);
+            font-weight: bold;
+            letter-spacing: 1px;
+        }
+
+        .content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 15px;
+        }
+
+        .m-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-bottom: 15px;
+        }
+
+        .card {
+            background: rgba(255, 255, 255, 0.03);
+            padding: 10px;
+            border-radius: 4px;
+            border: 1px solid #222;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .c-val {
+            font-size: 1.3em;
+            font-weight: 300;
+        }
+
+        .c-lbl {
+            font-size: 0.7em;
+            color: #777;
+            margin-top: 4px;
+        }
+
+        .ai-box {
+            background: rgba(0, 20, 0, 0.4);
+            border: 1px solid #004400;
+            padding: 12px;
+            font-family: 'Consolas', monospace;
+            font-size: 0.85em;
+            color: #4caf50;
+            margin-top: 10px;
+            position: relative;
+            border-left: 3px solid #00ff00;
+        }
+
+        /* VISUALS */
+        .leaflet-container {
+            background: #080808;
+        }
+
+        .custom-marker {
+            background: none;
+            border: none;
+        }
+
+        .particle {
+            width: 4px;
+            height: 4px;
+            background: #fff;
+            border-radius: 50%;
+            box-shadow: 0 0 6px rgba(255, 255, 255, 0.8);
+            position: absolute;
+            pointer-events: none;
+            transition: all 0.5s ease-out;
+            /* Smoother transitions for offset */
+        }
+
+        /* 4-ARM SIGNAL HEAD */
+        .junction-node {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            pointer-events: none;
+        }
+
+        .signal-head {
+            width: 44px;
+            height: 44px;
+            background: #111;
+            border: 2px solid #555;
+            border-radius: 8px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 3px;
+            padding: 3px;
+            box-shadow: 0 0 15px rgba(0, 0, 0, 0.9);
+            z-index: 2000;
+        }
+
+        .sig-light {
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            background: #222;
+            transition: background 0.2s, box-shadow 0.2s;
+        }
+
+        .sl-green {
+            background: #00C851;
+            box-shadow: 0 0 10px #00C851;
+        }
+
+        .sl-red {
+            background: #ff4444;
+            box-shadow: 0 0 6px #ff4444;
+        }
+
+        .sl-yellow {
+            background: #ffbb33;
+            box-shadow: 0 0 6px #ffbb33;
+        }
+
+        .j-label {
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 10px;
+            margin-top: 4px;
+            border: 1px solid #444;
+            white-space: nowrap;
+        }
+
+        .heat-blob {
+            border-radius: 50%;
+            width: 180px;
+            height: 180px;
+            background: radial-gradient(circle, rgba(255, 68, 68, 0.5) 0%, transparent 70%);
+            animation: pulse-heat 4s infinite;
+            pointer-events: none;
+        }
+
+        @keyframes pulse-heat {
+            0% {
+                opacity: 0.3;
+                transform: scale(0.9);
+            }
+
+            50% {
+                opacity: 0.7;
+                transform: scale(1.1);
+            }
+
+            100% {
+                opacity: 0.3;
+                transform: scale(0.9);
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="cmd-bar">
+        <div class="brand"><i class="fas fa-traffic-light"></i> TRAFFIC <span
+                style="font-weight:300; opacity:0.6">COMMAND</span></div>
+        <div class="sel-group">
+            <button class="sel-btn active" onclick="setView('CITY')" id="btn-CITY">NETWORK</button>
+            <button class="sel-btn" onclick="setView('Vyttila')" id="btn-Vyttila">VYTTILA</button>
+            <button class="sel-btn" onclick="setView('Edappally')" id="btn-Edappally">EDAPPALLY</button>
+            <button class="sel-btn" onclick="setView('Palarivattom')" id="btn-Palarivattom">PALARIVATTOM</button>
+            <button class="sel-btn" onclick="setView('Kakkanad')" id="btn-Kakkanad">KAKKANAD</button>
+        </div>
+
+        <div class="ctrl-panel">
+            <button class="ctrl-btn active" onclick="setSpeed(1)" id="spd-1">1x</button>
+            <button class="ctrl-btn" onclick="setSpeed(5)" id="spd-5">5x</button>
+            <button class="ctrl-btn" onclick="setSpeed(10)" id="spd-10">10x</button>
+            <button class="ctrl-btn emergency" onclick="toggleEmergency()" id="btn-emer">
+                <i class="fas fa-ambulance"></i> EMERGENCY
+            </button>
+        </div>
+
+        <div class="stats">
+            <div class="stat-box">
+                <div class="stat-val" style="color:var(--accent)" id="g-temp">--°C</div>
+                <div class="stat-lbl">TEMP</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-val" style="color:var(--success)" id="g-aqi">--</div>
+                <div class="stat-lbl">AQI</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-val" style="color:#fff" id="g-time">--:--</div>
+                <div class="stat-lbl">TIME</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="workspace">
+        <div class="map-container">
+            <div id="map"></div>
+        </div>
+        <div class="intel-panel">
+            <div class="header">
+                <div class="h-title" id="p-title">KOCHI CITY</div>
+                <div class="h-sub" id="p-sub">NETWORK STATUS: NOMINAL</div>
+                <div style="font-size:0.75em; color:#666; margin-top:5px" id="p-detail">System Online</div>
+            </div>
+            <div class="content">
+                <div class="m-grid">
+                    <div class="card">
+                        <div class="c-val" id="p-cong">--%</div>
+                        <div class="c-lbl">CONGESTION</div>
+                    </div>
+                    <div class="card">
+                        <div class="c-val" id="p-flow" style="color:var(--warning)">--</div>
+                        <div class="c-lbl">FLOW (veh/min)</div>
+                    </div>
+                    <div class="card">
+                        <div class="c-val" id="p-fuel" style="color:var(--success)">--</div>
+                        <div class="c-lbl">FUEL SAVED (L)</div>
+                    </div>
+                    <div class="card">
+                        <div class="c-val" id="p-co2">--</div>
+                        <div class="c-lbl">CO2 REDUCED (kg)</div>
+                    </div>
+                </div>
+
+                <div class="card" style="margin-bottom:15px; border-left: 3px solid var(--accent)">
+                    <div class="c-lbl" style="margin-bottom:8px">LIVE ALERTS</div>
+                    <div id="alert-box" style="font-size:0.85em; color:#bbb">
+                        No critical alerts.
+                    </div>
+                </div>
+
+                <div class="ai-box" id="ai-text">
+                    System calibrated.<br>
+                    > Analyzing junction throughput...
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        document.addEventListener("DOMContentLoaded", () => {
+
+            // --- CONFIG ---
+            const JUNCTIONS = {
+                'Vyttila': { lat: 9.9658, lng: 76.3182, capacity: 60, load: 0, phase: 0 },
+                'Edappally': { lat: 10.0236, lng: 76.3087, capacity: 70, load: 0, phase: 1 },
+                'Palarivattom': { lat: 10.0000, lng: 76.3000, capacity: 50, load: 0, phase: 2 },
+                'Kakkanad': { lat: 10.0150, lng: 76.3400, capacity: 40, load: 0, phase: 3 }
+            };
+            const DATA_URL = '/data/kochi_roads.json';
+            const BASE_CAPACITY = 135; // Calibrated for Kochi
+
+            // --- STATE ---
+            const map = L.map('map', { zoomControl: false, attributionControl: false }).setView([10.0000, 76.3200], 13);
+            let layers = {
+                roads: L.layerGroup().addTo(map),
+                particles: L.layerGroup().addTo(map),
+                heat: L.layerGroup().addTo(map),
+                junctions: L.layerGroup().addTo(map)
+            };
+            let roadData = [], vehicles = [];
+            let viewContext = 'CITY';
+            let simSpeed = 1;
+            let isEmergency = false;
+
+            // Stats
+            let globalFuel = 0;
+            let globalCO2 = 0;
+
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { opacity: 0.5, maxZoom: 18 }).addTo(map);
+
+            // --- INIT ---
+            async function init() {
+                try {
+                    const res = await fetch(DATA_URL);
+                    if (!res.ok) throw new Error("Data Error");
+                    roadData = await res.json();
+                } catch (e) { fallbackRoads(); }
+
+                renderRoads();
+                renderJunctions();
+                startLoops();
+            }
+
+            function fallbackRoads() {
+                roadData = [
+                    { coordinates: [[10.0236, 76.3087], [10.0000, 76.3000], [9.9658, 76.3182]], type: 'primary' },
+                    { coordinates: [[10.0000, 76.3000], [10.0150, 76.3400]], type: 'secondary' }
+                ];
+            }
+
+            function renderRoads() {
+                layers.roads.clearLayers();
+                roadData.forEach(r => {
+                    const isPri = r.type === 'primary';
+                    const col = isPri ? '#00bcd4' : '#555';
+                    const w = isPri ? 6 : 3; // Thicker for better visibility
+                    L.polyline(r.coordinates, { color: col, weight: w, opacity: 0.5 }).addTo(layers.roads);
+                    if (isPri) L.polyline(r.coordinates, { color: '#00bcd4', weight: 12, opacity: 0.1 }).addTo(layers.roads);
+                });
+                for (let i = 0; i < 350; i++) spawnVehicle();
+            }
+
+            function renderJunctions() {
+                Object.keys(JUNCTIONS).forEach(k => {
+                    const j = JUNCTIONS[k];
+                    const icon = L.divIcon({
+                        className: 'custom-marker',
+                        html: `
+                        <div class="junction-node">
+                            <div class="signal-head" id="head-${k}">
+                                <div class="sig-light sl-red" id="sl-${k}-0"></div>
+                                <div class="sig-light sl-red" id="sl-${k}-1"></div>
+                                <div class="sig-light sl-red" id="sl-${k}-2"></div>
+                                <div class="sig-light sl-red" id="sl-${k}-3"></div>
+                            </div>
+                            <div class="j-label">${k}</div>
+                        </div>`,
+                        iconSize: [44, 60], iconAnchor: [22, 30]
+                    });
+                    L.marker([j.lat, j.lng], { icon, zIndexOffset: 5000 }).on('click', () => setView(k)).addTo(layers.junctions);
+
+                    const heat = L.divIcon({
+                        className: 'custom-marker',
+                        html: `<div class="heat-blob" id="heat-${k}" style="display:none"></div>`,
+                        iconSize: [180, 180], iconAnchor: [90, 90]
+                    });
+                    L.marker([j.lat, j.lng], { icon: heat, zIndexOffset: 1000 }).addTo(layers.heat);
+                });
+            }
+
+            // --- SIMULATION ---
+            function spawnVehicle() {
+                if (!roadData.length) return;
+                const r = roadData[Math.floor(Math.random() * roadData.length)];
+                const reverse = Math.random() > 0.5;
+                vehicles.push({
+                    path: reverse ? [...r.coordinates].reverse() : r.coordinates,
+                    roadType: r.type,
+                    idx: 0, progress: Math.random(),
+                    speed: 0.002 + Math.random() * 0.002,
+                    marker: null,
+                    isEmergencyVehicle: false // Only true for demo corridor
+                });
+            }
+
+            function updateSimulation() {
+                // Reset Loads
+                Object.values(JUNCTIONS).forEach(j => j.load = 0);
+
+                vehicles.forEach(v => {
+
+                    // --- PHYSICS UPDATE WITH EMERGENCY LOGIC ---
+                    let speedMod = 1.0;
+                    let latOffset = 0;
+                    let lngOffset = 0;
+
+                    if (isEmergency && v.roadType === 'primary') {
+                        // Corridor Logic: "Giving Way"
+                        speedMod = 0.6; // Slow down
+                        // Simple visual offset to side
+                        latOffset = 0.0001;
+                        lngOffset = 0.0001;
+                        // Change color/opacity? Handled in render
+                    }
+
+                    v.progress += v.speed * simSpeed * speedMod;
+
+                    if (v.progress >= 1) {
+                        v.progress = 0; v.idx++;
+                        if (v.idx >= v.path.length - 1) {
+                            const newR = roadData[Math.floor(Math.random() * roadData.length)];
+                            v.path = Math.random() > 0.5 ? [...newR.coordinates].reverse() : newR.coordinates;
+                            v.idx = 0;
+                            v.roadType = newR.type;
+                        }
+                    }
+
+                    // Interpolation
+                    const p1 = v.path[v.idx];
+                    const p2 = v.path[v.idx + 1];
+                    let lat = p1[0] + (p2[0] - p1[0]) * v.progress;
+                    let lng = p1[1] + (p2[1] - p1[1]) * v.progress;
+
+                    // Apply Offset (Giving Way)
+                    lat += latOffset;
+                    lng += lngOffset;
+
+                    // Sync Junction Load
+                    for (const id in JUNCTIONS) {
+                        const j = JUNCTIONS[id];
+                        const d = Math.sqrt(Math.pow(lat - j.lat, 2) + Math.pow(lng - j.lng, 2));
+                        if (d < 0.012) j.load++;
+                    }
+
+                    // Render Update
+                    if (!v.marker) {
+                        v.marker = L.marker([lat, lng], {
+                            icon: L.divIcon({ className: 'custom-marker', html: `<div class="particle"></div>`, iconSize: [4, 4] }),
+                            zIndexOffset: 1500
+                        }).addTo(layers.particles);
+                    } else {
+                        v.marker.setLatLng([lat, lng]);
+                        // Visual state management
+                        const el = v.marker.getElement();
+                        if (el) {
+                            if (isEmergency && v.roadType === 'primary') {
+                                el.innerHTML = `<div class="particle" style="background:#888; opacity:0.5; box-shadow:none;"></div>`; // Faded/Give way
+                            } else {
+                                el.innerHTML = `<div class="particle" style="background:white; opacity:1;"></div>`;
+                            }
+                        }
+                    }
+                });
+
+                // Stats Accrual
+                globalFuel += 0.01 * simSpeed * (vehicles.length / 1000);
+                globalCO2 += 0.02 * simSpeed * (vehicles.length / 1000);
+
+                requestAnimationFrame(updateSimulation);
+            }
+
+            function updateSystem() {
+                const now = new Date();
+                document.getElementById('g-time').innerText = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+                // --- KOCHI ENVIRONMENT MODEL ---
+                let totalLoad = 0;
+                Object.values(JUNCTIONS).forEach(j => totalLoad += (j.load / j.capacity));
+                const avgCongestionPct = Math.min(totalLoad / 4, 0.95); // Clamp Max 95%
+                const avgCongestionVal = avgCongestionPct * 100;
+
+                // 1. TEMPERATURE (Base 31.5)
+                let temp = 31.5 + (avgCongestionVal * 0.015);
+                if (avgCongestionPct < 0.35) temp -= 1.2;
+
+                // Humidity Logic (70-85 range)
+                const humidity = 70 + (Math.sin(now.getTime() / 5000) * 7.5) + 7.5;
+                if (humidity > 80) temp = Math.max(temp, 30.5); // Min temp constraint
+
+                document.getElementById('g-temp').innerText = temp.toFixed(1) + "°C";
+
+                // 2. AQI (Base 95)
+                let timeMod = 5; // Normal
+                const hr = now.getHours();
+                if (hr >= 22 || hr < 6) timeMod = -5; // Night
+                else if ((hr >= 8 && hr <= 10) || (hr >= 17 && hr <= 19)) timeMod = 18; // Peak
+
+                let aqi = 95 + (avgCongestionVal * 0.35) + timeMod;
+                aqi = Math.max(85, Math.min(165, aqi)); // Clamp
+
+                document.getElementById('g-aqi').innerText = `AQI ${Math.round(aqi)}`;
+
+                const cycleTime = Math.floor(now.getTime() / 2000) % 4; // 2s per phase
+
+                Object.keys(JUNCTIONS).forEach(k => {
+                    const j = JUNCTIONS[k];
+                    const loadPct = Math.min(j.load / j.capacity, 0.95);
+
+                    // Heatmap logic - Critical Glow > 80%
+                    const heat = document.getElementById(`heat-${k}`);
+                    if (loadPct > 0.8) {
+                        heat.style.display = 'block';
+                        heat.style.background = 'radial-gradient(circle, rgba(255,0,0,0.8) 0%, transparent 70%)';
+                    } else if (loadPct > 0.6) {
+                        heat.style.display = 'block';
+                        heat.style.background = 'radial-gradient(circle, rgba(255,68,68,0.5) 0%, transparent 70%)';
+                    } else {
+                        heat.style.display = 'none';
+                    }
+
+                    // 4-Phase Signal Logic
+                    if (isEmergency) {
+                        // Main Corridor Logic: Assume Phase 0 is corridor
+                        // Phase 0 gets GREEN, others RED BLINK
+                        [0, 1, 2, 3].forEach(i => {
+                            const el = document.getElementById(`sl-${k}-${i}`);
+                            if (i === 0) el.className = 'sig-light sl-green'; // Solid Green for Priority
+                            else el.className = (now.getTime() % 500 < 250) ? 'sig-light sl-red' : 'sig-light sl-yellow'; // Blink Warning
+                        });
+                    } else {
+                        const greenArm = (cycleTime + j.phase) % 4;
+                        [0, 1, 2, 3].forEach(i => {
+                            const el = document.getElementById(`sl-${k}-${i}`);
+                            el.className = (i === greenArm) ? 'sig-light sl-green' : 'sig-light sl-red';
+                        });
+                    }
+                });
+
+                updateUI(now);
+            }
+
+            function calculateFlow(loadPct, now) {
+                const hour = now.getHours();
+                loadPct = Math.min(loadPct, 0.95); // Clamp
+
+                // Time Multiplier
+                let timeMult = 0.7; // Normal
+                if (hour >= 22 || hour < 6) timeMult = 0.35;
+                else if ((hour >= 8 && hour <= 10) || (hour >= 17 && hour <= 19)) timeMult = 0.95;
+                else if (hour >= 11 && hour <= 16) timeMult = 0.55;
+
+                // Congestion Multiplier (Tuned for Base 135)
+                let congMult = 1.0;
+                if (loadPct < 0.3) congMult = 0.6;       // 135 * 0.7 * 0.6 = ~56 (Normal Min)
+                else if (loadPct < 0.6) congMult = 0.85; // 135 * 0.7 * 0.85 = ~80
+                else if (loadPct < 0.8) congMult = 0.95; // 135 * 0.8 ...
+                else congMult = 1.1;                    // Peak Burst
+
+                let flow = BASE_CAPACITY * timeMult * congMult;
+
+                // Peak check
+                if (timeMult > 0.9 && congMult > 1.0) return Math.min(150, Math.floor(flow));
+                return Math.max(20, Math.min(115, Math.floor(flow)));
+            }
+
+            function updateUI(now) {
+                if (viewContext === 'CITY') {
+                    let totalLoad = 0;
+                    Object.values(JUNCTIONS).forEach(j => totalLoad += (j.load / j.capacity));
+                    const avgLoad = totalLoad / 4;
+                    const flow = calculateFlow(avgLoad, now);
+
+                    document.getElementById('p-cong').innerText = Math.round(avgLoad * 100) + "%";
+                    document.getElementById('p-flow').innerText = flow * 4; // City sum
+                    document.getElementById('p-fuel').innerText = globalFuel.toFixed(1);
+                    document.getElementById('p-co2').innerText = globalCO2.toFixed(1);
+
+                    if (isEmergency) {
+                        document.getElementById('p-sub').innerText = "⚠ EMERGENCY PROTOCOL ACTIVE";
+                        document.getElementById('p-sub').style.color = "#ff4444";
+                        document.getElementById('alert-box').innerHTML = "<span style='color:#ff4444'>CORRIDOR CLEARED: NH66</span><br>CIVILIAN TRAFFIC HALTED.";
+                        document.getElementById('ai-text').innerHTML = "Priority Routing Active.<br>> 100% Green Phase lock on Corridor.<br>> Cross-traffic blocked.";
+                    } else {
+                        document.getElementById('p-sub').innerText = "NETWORK STATUS: NOMINAL";
+                        document.getElementById('p-sub').style.color = "#00bcd4";
+                        document.getElementById('alert-box').innerText = "Traffic flow within predicted parameters.";
+                        document.getElementById('ai-text').innerHTML = "AI Optimization Active.<br>> Signal phasing synced to Peak demand.<br>> Latency minimized.";
+                    }
+
+                } else {
+                    const j = JUNCTIONS[viewContext];
+                    const pct = j.load / j.capacity;
+                    const flow = calculateFlow(pct, now);
+
+                    document.getElementById('p-cong').innerText = Math.round(pct * 100) + "%";
+                    document.getElementById('p-cong').style.color = pct > 0.6 ? '#ff4444' : '#e0e0e0';
+                    document.getElementById('p-flow').innerText = flow;
+                    document.getElementById('p-fuel').innerText = (globalFuel / 4).toFixed(1);
+                    document.getElementById('p-co2').innerText = (globalCO2 / 4).toFixed(1);
+
+                    const msgs = pct > 0.6
+                        ? ["Capacity Exceeded.", "Activating Overflow Buffers.", "Phase Extension: ON"]
+                        : ["Flow Optimal.", "Cycle: Standard.", "No Interruptions."];
+
+                    document.getElementById('ai-text').innerHTML = `Junction Analysis:<br>> ${msgs[0]}<br>> ${msgs[1]}`;
+                }
+            }
+
+            // --- CONTROLS ---
+            function startLoops() {
+                requestAnimationFrame(updateSimulation);
+                setInterval(updateSystem, 1000);
+            }
+
+            window.setView = function (ctx) {
+                viewContext = ctx;
+                document.querySelectorAll('.sel-btn').forEach(b => b.classList.remove('active'));
+                document.getElementById(`btn-${ctx}`).classList.add('active');
+
+                if (ctx === 'CITY') {
+                    map.flyTo([10.0000, 76.3200], 13);
+                    document.getElementById('p-title').innerText = "KOCHI CITY";
+                    document.getElementById('p-detail').innerText = "Network Overview";
+                } else {
+                    map.flyTo([JUNCTIONS[ctx].lat, JUNCTIONS[ctx].lng], 15);
+                    document.getElementById('p-title').innerText = ctx.toUpperCase();
+                    document.getElementById('p-detail').innerText = `ID: ${ctx.substring(0, 3).toUpperCase()}-NODE`;
+                }
+                updateUI(new Date());
+            }
+
+            window.setSpeed = function (s) {
+                simSpeed = s;
+                document.querySelectorAll('.ctrl-btn').forEach(b => { if (b.id !== 'btn-emer') b.classList.remove('active'); });
+                if (s <= 10) document.getElementById(`spd-${s}`).classList.add('active');
+            }
+
+            window.toggleEmergency = function () {
+                isEmergency = !isEmergency;
+                const btn = document.getElementById('btn-emer');
+                if (isEmergency) btn.classList.add('active'); else btn.classList.remove('active');
+                updateUI(new Date());
+            }
+
+            init();
+        });
+    </script>
+</body>
+
+</html>
