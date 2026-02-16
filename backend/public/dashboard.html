@@ -259,18 +259,6 @@
             border: none;
         }
 
-        .particle {
-            width: 4px;
-            height: 4px;
-            background: #fff;
-            border-radius: 50%;
-            box-shadow: 0 0 6px rgba(255, 255, 255, 0.8);
-            position: absolute;
-            pointer-events: none;
-            transition: all 0.5s ease-out;
-            /* Smoother transitions for offset */
-        }
-
         /* 4-ARM SIGNAL HEAD */
         .junction-node {
             display: flex;
@@ -352,6 +340,39 @@
                 transform: scale(0.9);
             }
         }
+
+        .road-line {
+            filter: drop-shadow(0 0 5px var(--accent));
+        }
+
+        .j-float {
+            position: absolute;
+            top: -25px;
+            background: rgba(0, 20, 40, 0.95);
+            color: #00ffff;
+            border: 1px solid #00ffff;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.7em;
+            font-weight: bold;
+            white-space: nowrap;
+            z-index: 3000;
+            animation: float 2s infinite ease-in-out;
+            pointer-events: none;
+            box-shadow: 0 0 10px rgba(0, 255, 255, 0.3);
+        }
+
+        @keyframes float {
+
+            0%,
+            100% {
+                transform: translateY(0);
+            }
+
+            50% {
+                transform: translateY(-4px);
+            }
+        }
     </style>
 </head>
 
@@ -362,10 +383,10 @@
                 style="font-weight:300; opacity:0.6">COMMAND</span></div>
         <div class="sel-group">
             <button class="sel-btn active" onclick="setView('CITY')" id="btn-CITY">NETWORK</button>
-            <button class="sel-btn" onclick="setView('Vyttila')" id="btn-Vyttila">VYTTILA</button>
-            <button class="sel-btn" onclick="setView('Edappally')" id="btn-Edappally">EDAPPALLY</button>
-            <button class="sel-btn" onclick="setView('Palarivattom')" id="btn-Palarivattom">PALARIVATTOM</button>
-            <button class="sel-btn" onclick="setView('Kakkanad')" id="btn-Kakkanad">KAKKANAD</button>
+            <button class="sel-btn" onclick="setView('n_vyttila')" id="btn-n_vyttila">VYTTILA</button>
+            <button class="sel-btn" onclick="setView('n_edappally')" id="btn-n_edappally">EDAPPALLY</button>
+            <button class="sel-btn" onclick="setView('n_palarivattom')" id="btn-n_palarivattom">PALARIVATTOM</button>
+            <button class="sel-btn" onclick="setView('n_kakkanad')" id="btn-n_kakkanad">KAKKANAD</button>
         </div>
 
         <div class="ctrl-panel">
@@ -410,6 +431,10 @@
                         <div class="c-lbl">CONGESTION</div>
                     </div>
                     <div class="card">
+                        <div class="c-val" id="p-demand" style="color:#aaa">--</div>
+                        <div class="c-lbl">DEMAND (Veh)</div>
+                    </div>
+                    <div class="card">
                         <div class="c-val" id="p-flow" style="color:var(--warning)">--</div>
                         <div class="c-lbl">FLOW (veh/min)</div>
                     </div>
@@ -418,8 +443,8 @@
                         <div class="c-lbl">FUEL SAVED (L)</div>
                     </div>
                     <div class="card">
-                        <div class="c-val" id="p-co2">--</div>
-                        <div class="c-lbl">CO2 REDUCED (kg)</div>
+                        <div class="c-val" id="p-co2" style="color:var(--success)">--</div>
+                        <div class="c-lbl">CO2 SAVED (kg)</div>
                     </div>
                 </div>
 
@@ -441,357 +466,739 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
         document.addEventListener("DOMContentLoaded", () => {
-
             // --- CONFIG ---
-            const JUNCTIONS = {
-                'Vyttila': { lat: 9.9658, lng: 76.3182, capacity: 60, load: 0, phase: 0 },
-                'Edappally': { lat: 10.0236, lng: 76.3087, capacity: 70, load: 0, phase: 1 },
-                'Palarivattom': { lat: 10.0000, lng: 76.3000, capacity: 50, load: 0, phase: 2 },
-                'Kakkanad': { lat: 10.0150, lng: 76.3400, capacity: 40, load: 0, phase: 3 }
+            const DATA_URL = '/data/kochi_graph.json';
+
+            // Simulation Constants
+            const CONFIG = {
+                BASE_SCALE: 0.0005,
+                CYCLE_TIME: 120, // sec
+                LANE_CAPACITY: 2, // veh/sec/lane (Saturation flow)
+                LANES: 2,
+
+                THRESHOLDS: {
+                    NORMAL: 0.60,
+                    OPTIMIZING: 0.75,
+                    DIVERTING_ENTER: 0.75,
+                    DIVERTING_EXIT: 0.60
+                },
+                TIMERS: {
+                    ENTER_DIVERT: 15000, // 15s
+                    EXIT_DIVERT: 20000   // 20s
+                },
+                MAX_VEHICLES: 600,
+                CONTROL_JUNCTIONS: ['n_vyttila', 'n_edappally', 'n_palarivattom', 'n_kakkanad'],
+
+                ENVIRONMENT: {
+                    TEMP_BASE_DAY: 31,
+                    TEMP_BASE_NIGHT: 27,
+                    AQI_BASE: 110,
+                    AQI_PEAK_OFFSET: 30
+                }
             };
-            const DATA_URL = '/data/kochi_roads.json';
-            const BASE_CAPACITY = 135; // Calibrated for Kochi
 
-            // --- STATE ---
-            const map = L.map('map', { zoomControl: false, attributionControl: false }).setView([10.0000, 76.3200], 13);
-            let layers = {
-                roads: L.layerGroup().addTo(map),
-                particles: L.layerGroup().addTo(map),
-                heat: L.layerGroup().addTo(map),
-                junctions: L.layerGroup().addTo(map)
+            // Application State
+            const App = {
+                map: null,
+                layers: {},
+                graph: { nodes: {}, edges: [] },
+                vehicles: [],
+                junctions: {},
+                context: 'CITY',
+                simSpeed: 1,
+                isEmergency: false,
+                stats: { fuel: 0, co2: 0, time: 0 },
+                running: true,
+                canvas: null,
+                ctx: null,
+                diversions: new Map(), // JunctionID -> { percent, causeEdge, since }
+                lastTick: Date.now(),
+                engineRunning: false
             };
-            let roadData = [], vehicles = [];
-            let viewContext = 'CITY';
-            let simSpeed = 1;
-            let isEmergency = false;
 
-            // Stats
-            let globalFuel = 0;
-            let globalCO2 = 0;
-
-            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { opacity: 0.5, maxZoom: 18 }).addTo(map);
-
-            // --- INIT ---
+            // --- INITIALIZATION ---
+            // --- INITIALIZATION ---
             async function init() {
+                console.log("Initializing Dashboard...");
+                initMap();
+
+                // 2. Safety Timeout (Fail-safe)
+                setTimeout(() => {
+                    if (!App.engineRunning) {
+                        console.warn("Initialization Timeout - Forcing Fallback Mode");
+                        if (Object.keys(App.graph.nodes).length === 0) buildBackupGraph();
+                        if (!App.ctx) initCanvasOverlay();
+                        startSimulation();
+                    }
+                }, 2000);
+
+                // 3. Load Data
                 try {
                     const res = await fetch(DATA_URL);
-                    if (!res.ok) throw new Error("Data Error");
-                    roadData = await res.json();
-                } catch (e) { fallbackRoads(); }
+                    if (!res.ok) throw new Error("Data Load Failed");
+                    const data = await res.json();
+                    buildGraph(data);
+                    console.log("Graph Loaded Successfully");
+                } catch (e) {
+                    console.error("Data Fetch Error:", e);
+                    buildBackupGraph();
+                }
 
-                renderRoads();
-                renderJunctions();
-                startLoops();
+                // 4. Start (if not already started by timeout)
+                initCanvasOverlay();
+                startSimulation();
             }
 
-            function fallbackRoads() {
-                roadData = [
-                    { coordinates: [[10.0236, 76.3087], [10.0000, 76.3000], [9.9658, 76.3182]], type: 'primary' },
-                    { coordinates: [[10.0000, 76.3000], [10.0150, 76.3400]], type: 'secondary' }
+            function initMap() {
+                App.map = L.map('map', {
+                    zoomControl: false,
+                    attributionControl: false,
+                    renderer: L.canvas()
+                }).setView([9.9950, 76.3100], 13);
+
+                L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                    opacity: 0.5,
+                    maxZoom: 18,
+                    subdomains: 'abcd'
+                }).addTo(App.map);
+
+                App.layers = {
+                    roads: L.layerGroup().addTo(App.map),
+                    junctions: L.layerGroup().addTo(App.map),
+                    effects: L.layerGroup().addTo(App.map)
+                };
+            }
+
+            function initCanvasOverlay() {
+                L.CanvasOverlay = L.Layer.extend({
+                    onAdd: function (map) {
+                        const pane = map.getPane('overlayPane');
+                        this._canvas = L.DomUtil.create('canvas', 'leaflet-zoom-hide');
+                        this._canvas.style.pointerEvents = 'none';
+                        pane.appendChild(this._canvas);
+                        this._ctx = this._canvas.getContext('2d');
+                        map.on('moveend zoomend', this._reset, this);
+                        this._reset();
+                        App.canvas = this._canvas;
+                        App.ctx = this._ctx;
+                    },
+                    onRemove: function (map) {
+                        L.DomUtil.remove(this._canvas);
+                        map.off('moveend zoomend', this._reset, this);
+                    },
+                    _reset: function () {
+                        const bounds = this._map.getBounds();
+                        const size = this._map.getSize();
+                        const topLeft = this._map.latLngToLayerPoint(bounds.getNorthWest());
+                        L.DomUtil.setPosition(this._canvas, topLeft);
+                        this._canvas.width = size.x;
+                        this._canvas.height = size.y;
+                        this._draw();
+                    },
+                    _draw: function () { }
+                });
+                App.map.addLayer(new L.CanvasOverlay());
+            }
+
+            // --- GRAPH ENGINE ---
+            function buildGraph(data) {
+                App.graph.nodes = data.nodes;
+                App.graph.edges = [];
+
+                data.edges.forEach((e, idx) => {
+                    App.graph.edges.push({ ...e, id: `e_${idx}_f`, currentLoad: 0 }); // Forward
+                    App.graph.edges.push({ from: e.to, to: e.from, type: e.type, weight: e.weight, id: `e_${idx}_r`, currentLoad: 0 }); // Reverse
+                });
+
+                Object.entries(App.graph.nodes).forEach(([id, node]) => {
+                    if (node.type === 'junction') {
+                        App.junctions[id] = {
+                            ...node,
+                            // Physics State
+                            queue: 20, // Initial vehicles
+                            arrivals: 0,
+                            discharged: 0,
+                            flowMetric: 50,
+                            capacity: 300, // Max queue capacity for calc
+
+                            // State Machine
+                            state: 'NORMAL',
+                            stateTimer: 0,
+                            activePhase: 0,
+                            lastSwitch: 0,
+                            diversionPct: 0
+                        };
+                        renderJunctionMarker(id, node);
+                    }
+                });
+
+                renderRoads();
+                for (let i = 0; i < 300; i++) spawnVehicle();
+            }
+
+            function buildBackupGraph() {
+                if (Object.keys(App.graph.nodes).length > 0) return;
+
+                console.log("Building Fallback Graph (Control Junctions)");
+                // Coords approx to Kochi center
+                const nodes = {
+                    "n_vyttila": { lat: 9.9658, lng: 76.3182, type: "junction", name: "Vyttila" },
+                    "n_edappally": { lat: 10.0236, lng: 76.3087, type: "junction", name: "Edappally" },
+                    "n_palarivattom": { lat: 10.0050, lng: 76.3065, type: "junction", name: "Palarivattom" },
+                    "n_kakkanad": { lat: 10.0150, lng: 76.3400, type: "junction", name: "Kakkanad" }
+                };
+
+                const edges = [
+                    // Circular Route for Demo Flow
+                    { from: "n_vyttila", to: "n_palarivattom", type: "primary", weight: 50 },
+                    { from: "n_palarivattom", to: "n_edappally", type: "primary", weight: 40 },
+                    { from: "n_edappally", to: "n_kakkanad", type: "primary", weight: 45 },
+                    { from: "n_kakkanad", to: "n_palarivattom", type: "primary", weight: 35 },
+                    // Reverse
+                    { from: "n_palarivattom", to: "n_vyttila", type: "primary", weight: 50 },
+                    { from: "n_edappally", to: "n_palarivattom", type: "primary", weight: 40 },
+                    { from: "n_kakkanad", to: "n_edappally", type: "primary", weight: 45 },
+                    { from: "n_palarivattom", to: "n_kakkanad", type: "primary", weight: 35 }
                 ];
+
+                buildGraph({ nodes, edges });
             }
 
             function renderRoads() {
-                layers.roads.clearLayers();
-                roadData.forEach(r => {
-                    const isPri = r.type === 'primary';
-                    const col = isPri ? '#00bcd4' : '#555';
-                    const w = isPri ? 6 : 3; // Thicker for better visibility
-                    L.polyline(r.coordinates, { color: col, weight: w, opacity: 0.5 }).addTo(layers.roads);
-                    if (isPri) L.polyline(r.coordinates, { color: '#00bcd4', weight: 12, opacity: 0.1 }).addTo(layers.roads);
+                App.layers.roads.clearLayers();
+                const processed = new Set();
+                App.graph.edges.forEach(e => {
+                    const k = [e.from, e.to].sort().join('-');
+                    if (processed.has(k)) return;
+                    processed.add(k);
+
+                    const n1 = App.graph.nodes[e.from];
+                    const n2 = App.graph.nodes[e.to];
+                    const color = getRoadColor(e.type);
+                    const weight = e.type === 'primary' ? 4 : (e.type === 'secondary' ? 2 : 1);
+
+                    L.polyline([[n1.lat, n1.lng], [n2.lat, n2.lng]], {
+                        color, weight, opacity: 0.4, className: 'road-line'
+                    }).addTo(App.layers.roads);
+
+                    if (e.type === 'primary') {
+                        L.polyline([[n1.lat, n1.lng], [n2.lat, n2.lng]], {
+                            color: '#0ff', weight: 10, opacity: 0.05
+                        }).addTo(App.layers.roads);
+                    }
                 });
-                for (let i = 0; i < 350; i++) spawnVehicle();
             }
 
-            function renderJunctions() {
-                Object.keys(JUNCTIONS).forEach(k => {
-                    const j = JUNCTIONS[k];
+            function renderJunctionMarker(id, node) {
+                // 1. Control Junctions (Visible, Clickable)
+                if (CONFIG.CONTROL_JUNCTIONS.includes(id)) {
                     const icon = L.divIcon({
                         className: 'custom-marker',
                         html: `
                         <div class="junction-node">
-                            <div class="signal-head" id="head-${k}">
-                                <div class="sig-light sl-red" id="sl-${k}-0"></div>
-                                <div class="sig-light sl-red" id="sl-${k}-1"></div>
-                                <div class="sig-light sl-red" id="sl-${k}-2"></div>
-                                <div class="sig-light sl-red" id="sl-${k}-3"></div>
+                            <div class="signal-head" id="sig-${id}">
+                                <div class="sig-light sl-red" id="sl-${id}-0"></div>
+                                <div class="sig-light sl-red" id="sl-${id}-1"></div>
+                                <div class="sig-light sl-red" id="sl-${id}-2"></div>
+                                <div class="sig-light sl-red" id="sl-${id}-3"></div>
                             </div>
-                            <div class="j-label">${k}</div>
+                            <div class="j-label">${node.name.toUpperCase()}</div>
+                             <div class="j-float" id="flo-${id}" style="display:none">DIVERTING Traffic</div>
                         </div>`,
                         iconSize: [44, 60], iconAnchor: [22, 30]
                     });
-                    L.marker([j.lat, j.lng], { icon, zIndexOffset: 5000 }).on('click', () => setView(k)).addTo(layers.junctions);
 
-                    const heat = L.divIcon({
-                        className: 'custom-marker',
-                        html: `<div class="heat-blob" id="heat-${k}" style="display:none"></div>`,
-                        iconSize: [180, 180], iconAnchor: [90, 90]
+                    const marker = L.marker([node.lat, node.lng], { icon, zIndexOffset: 5000 });
+                    marker.on('click', () => setView(id));
+
+                    // FIX: access element only after added
+                    marker.on('add', () => {
+                        const el = marker.getElement();
+                        if (el) el.style.cursor = 'pointer';
                     });
-                    L.marker([j.lat, j.lng], { icon: heat, zIndexOffset: 1000 }).addTo(layers.heat);
+
+                    marker.addTo(App.layers.junctions);
+                }
+
+                // 2. Heat Blob (ALL Junctions to show congestion even if invisible)
+                const heatIcon = L.divIcon({
+                    className: 'custom-marker',
+                    html: `<div class="heat-blob" id="heat-${id}" style="display:none"></div>`,
+                    iconSize: [200, 200], iconAnchor: [100, 100]
                 });
+                L.marker([node.lat, node.lng], { icon: heatIcon, zIndexOffset: 1000 }).addTo(App.layers.effects);
             }
 
-            // --- SIMULATION ---
-            function spawnVehicle() {
-                if (!roadData.length) return;
-                const r = roadData[Math.floor(Math.random() * roadData.length)];
-                const reverse = Math.random() > 0.5;
-                vehicles.push({
-                    path: reverse ? [...r.coordinates].reverse() : r.coordinates,
-                    roadType: r.type,
-                    idx: 0, progress: Math.random(),
-                    speed: 0.002 + Math.random() * 0.002,
-                    marker: null,
-                    isEmergencyVehicle: false // Only true for demo corridor
-                });
-            }
+            // --- LOGIC ---
+            class Vehicle {
+                constructor() { this.reset(); }
 
-            function updateSimulation() {
-                // Reset Loads
-                Object.values(JUNCTIONS).forEach(j => j.load = 0);
+                reset() {
+                    this.speed = (0.5 + Math.random() * 0.5) * CONFIG.BASE_SCALE;
+                    this.progress = 0;
+                    this.color = '#fff';
+                    this.state = 'MOVING';
 
-                vehicles.forEach(v => {
+                    const nodes = Object.keys(App.graph.nodes);
+                    const techZones = ['n_kakkanad', 'n_infopark'].filter(n => App.graph.nodes[n]);
 
-                    // --- PHYSICS UPDATE WITH EMERGENCY LOGIC ---
-                    let speedMod = 1.0;
-                    let latOffset = 0;
-                    let lngOffset = 0;
-
-                    if (isEmergency && v.roadType === 'primary') {
-                        // Corridor Logic: "Giving Way"
-                        speedMod = 0.6; // Slow down
-                        // Simple visual offset to side
-                        latOffset = 0.0001;
-                        lngOffset = 0.0001;
-                        // Change color/opacity? Handled in render
-                    }
-
-                    v.progress += v.speed * simSpeed * speedMod;
-
-                    if (v.progress >= 1) {
-                        v.progress = 0; v.idx++;
-                        if (v.idx >= v.path.length - 1) {
-                            const newR = roadData[Math.floor(Math.random() * roadData.length)];
-                            v.path = Math.random() > 0.5 ? [...newR.coordinates].reverse() : newR.coordinates;
-                            v.idx = 0;
-                            v.roadType = newR.type;
-                        }
-                    }
-
-                    // Interpolation
-                    const p1 = v.path[v.idx];
-                    const p2 = v.path[v.idx + 1];
-                    let lat = p1[0] + (p2[0] - p1[0]) * v.progress;
-                    let lng = p1[1] + (p2[1] - p1[1]) * v.progress;
-
-                    // Apply Offset (Giving Way)
-                    lat += latOffset;
-                    lng += lngOffset;
-
-                    // Sync Junction Load
-                    for (const id in JUNCTIONS) {
-                        const j = JUNCTIONS[id];
-                        const d = Math.sqrt(Math.pow(lat - j.lat, 2) + Math.pow(lng - j.lng, 2));
-                        if (d < 0.012) j.load++;
-                    }
-
-                    // Render Update
-                    if (!v.marker) {
-                        v.marker = L.marker([lat, lng], {
-                            icon: L.divIcon({ className: 'custom-marker', html: `<div class="particle"></div>`, iconSize: [4, 4] }),
-                            zIndexOffset: 1500
-                        }).addTo(layers.particles);
+                    if (Math.random() < 0.35 && techZones.length > 0) {
+                        this.targetNode = techZones[0];
+                        this.currentNode = nodes[Math.floor(Math.random() * nodes.length)];
                     } else {
-                        v.marker.setLatLng([lat, lng]);
-                        // Visual state management
-                        const el = v.marker.getElement();
-                        if (el) {
-                            if (isEmergency && v.roadType === 'primary') {
-                                el.innerHTML = `<div class="particle" style="background:#888; opacity:0.5; box-shadow:none;"></div>`; // Faded/Give way
-                            } else {
-                                el.innerHTML = `<div class="particle" style="background:white; opacity:1;"></div>`;
+                        this.currentNode = nodes[Math.floor(Math.random() * nodes.length)];
+                        this.targetNode = nodes[Math.floor(Math.random() * nodes.length)];
+                    }
+
+                    if (this.currentNode === this.targetNode) this.targetNode = nodes[0];
+                    this.path = this.findPath(this.currentNode, this.targetNode);
+                    this.pathIndex = 0;
+
+                    if (!this.path) { this.retry(); return; }
+                    this.updateEdge();
+                }
+
+                retry() { if (!this.retries) this.retries = 0; if (this.retries++ < 5) this.reset(); }
+
+                findPath(start, end, diverted = false) {
+                    const q = [{ id: start, cost: 0, path: [start] }];
+                    const visited = new Set();
+                    let count = 0;
+
+                    while (q.length > 0 && count < 150) {
+                        q.sort((a, b) => a.cost - b.cost);
+                        const curr = q.shift();
+                        count++;
+                        if (curr.id === end) return curr.path;
+                        if (visited.has(curr.id)) continue;
+                        visited.add(curr.id);
+
+                        const outbound = App.graph.edges.filter(e => e.from === curr.id);
+                        for (const e of outbound) {
+                            if (visited.has(e.to)) continue;
+                            let weight = e.weight;
+
+                            // Logic: Emergency Override
+                            if (App.isEmergency && e.type === 'primary') {
+                                weight = 0; // Priority Highway is FREE
+                            } else if (diverted) {
+                                const j = App.junctions[e.to];
+                                if (j && j.queue > 80) weight += 100;
                             }
+                            q.push({ id: e.to, cost: curr.cost + weight, path: [...curr.path, e.to] });
                         }
                     }
-                });
+                    return null;
+                }
 
-                // Stats Accrual
-                globalFuel += 0.01 * simSpeed * (vehicles.length / 1000);
-                globalCO2 += 0.02 * simSpeed * (vehicles.length / 1000);
+                updateEdge() {
+                    if (this.pathIndex >= this.path.length - 1) { this.reset(); return; }
+                    this.fromId = this.path[this.pathIndex];
+                    this.toId = this.path[this.pathIndex + 1];
+                    this.pathIndex++;
+                    this.progress = 0;
+                    this.p1 = App.graph.nodes[this.fromId];
+                    this.p2 = App.graph.nodes[this.toId];
 
-                requestAnimationFrame(updateSimulation);
-            }
-
-            function updateSystem() {
-                const now = new Date();
-                document.getElementById('g-time').innerText = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-                // --- KOCHI ENVIRONMENT MODEL ---
-                let totalLoad = 0;
-                Object.values(JUNCTIONS).forEach(j => totalLoad += (j.load / j.capacity));
-                const avgCongestionPct = Math.min(totalLoad / 4, 0.95); // Clamp Max 95%
-                const avgCongestionVal = avgCongestionPct * 100;
-
-                // 1. TEMPERATURE (Base 31.5)
-                let temp = 31.5 + (avgCongestionVal * 0.015);
-                if (avgCongestionPct < 0.35) temp -= 1.2;
-
-                // Humidity Logic (70-85 range)
-                const humidity = 70 + (Math.sin(now.getTime() / 5000) * 7.5) + 7.5;
-                if (humidity > 80) temp = Math.max(temp, 30.5); // Min temp constraint
-
-                document.getElementById('g-temp').innerText = temp.toFixed(1) + "°C";
-
-                // 2. AQI (Base 95)
-                let timeMod = 5; // Normal
-                const hr = now.getHours();
-                if (hr >= 22 || hr < 6) timeMod = -5; // Night
-                else if ((hr >= 8 && hr <= 10) || (hr >= 17 && hr <= 19)) timeMod = 18; // Peak
-
-                let aqi = 95 + (avgCongestionVal * 0.35) + timeMod;
-                aqi = Math.max(85, Math.min(165, aqi)); // Clamp
-
-                document.getElementById('g-aqi').innerText = `AQI ${Math.round(aqi)}`;
-
-                const cycleTime = Math.floor(now.getTime() / 2000) % 4; // 2s per phase
-
-                Object.keys(JUNCTIONS).forEach(k => {
-                    const j = JUNCTIONS[k];
-                    const loadPct = Math.min(j.load / j.capacity, 0.95);
-
-                    // Heatmap logic - Critical Glow > 80%
-                    const heat = document.getElementById(`heat-${k}`);
-                    if (loadPct > 0.8) {
-                        heat.style.display = 'block';
-                        heat.style.background = 'radial-gradient(circle, rgba(255,0,0,0.8) 0%, transparent 70%)';
-                    } else if (loadPct > 0.6) {
-                        heat.style.display = 'block';
-                        heat.style.background = 'radial-gradient(circle, rgba(255,68,68,0.5) 0%, transparent 70%)';
+                    // Visuals
+                    const j = App.junctions[this.toId];
+                    if (j && j.diversionPct > 10) {
+                        this.color = '#00ffff';
                     } else {
-                        heat.style.display = 'none';
+                        this.color = '#fff';
+                    }
+                }
+
+                update(dt) {
+                    // Logic: Stop at junction
+                    if (this.progress > 0.85 && App.junctions[this.toId]) {
+                        const j = App.junctions[this.toId];
+                        // Stop if Red Phase (Simulated prob) or Emergency
+                        if (App.isEmergency) {
+                            // If I am on priority road, I go. Else I stop.
+                            const edge = App.graph.edges.find(e => e.from === this.fromId && e.to === this.toId);
+                            if (edge.type !== 'primary') return; // Stop!!!
+                        } else {
+                            if (j.queue > 60 && Math.random() < 0.1) return;
+                        }
                     }
 
-                    // 4-Phase Signal Logic
-                    if (isEmergency) {
-                        // Main Corridor Logic: Assume Phase 0 is corridor
-                        // Phase 0 gets GREEN, others RED BLINK
-                        [0, 1, 2, 3].forEach(i => {
-                            const el = document.getElementById(`sl-${k}-${i}`);
-                            if (i === 0) el.className = 'sig-light sl-green'; // Solid Green for Priority
-                            else el.className = (now.getTime() % 500 < 250) ? 'sig-light sl-red' : 'sig-light sl-yellow'; // Blink Warning
-                        });
-                    } else {
-                        const greenArm = (cycleTime + j.phase) % 4;
-                        [0, 1, 2, 3].forEach(i => {
-                            const el = document.getElementById(`sl-${k}-${i}`);
-                            el.className = (i === greenArm) ? 'sig-light sl-green' : 'sig-light sl-red';
-                        });
+                    // Move
+                    let spd = this.speed * App.simSpeed;
+                    if (App.isEmergency) {
+                        const edge = App.graph.edges.find(e => e.from === this.fromId && e.to === this.toId);
+                        if (edge.type === 'primary') spd *= 1.4; // Ambulance Mode
+                        else spd *= 0.6; // Pull over mode
                     }
-                });
+                    this.progress += spd * dt;
+                    if (this.progress >= 1) {
+                        // Arrivals
+                        if (App.junctions[this.toId]) App.junctions[this.toId].arrivals++;
+                        this.updateEdge();
+                    }
+                }
 
-                updateUI(now);
-            }
+                draw(ctx, map) {
+                    if (!this.p1 || !this.p2) return;
+                    let lat = this.p1.lat + (this.p2.lat - this.p1.lat) * this.progress;
+                    let lng = this.p1.lng + (this.p2.lng - this.p1.lng) * this.progress;
 
-            function calculateFlow(loadPct, now) {
-                const hour = now.getHours();
-                loadPct = Math.min(loadPct, 0.95); // Clamp
-
-                // Time Multiplier
-                let timeMult = 0.7; // Normal
-                if (hour >= 22 || hour < 6) timeMult = 0.35;
-                else if ((hour >= 8 && hour <= 10) || (hour >= 17 && hour <= 19)) timeMult = 0.95;
-                else if (hour >= 11 && hour <= 16) timeMult = 0.55;
-
-                // Congestion Multiplier (Tuned for Base 135)
-                let congMult = 1.0;
-                if (loadPct < 0.3) congMult = 0.6;       // 135 * 0.7 * 0.6 = ~56 (Normal Min)
-                else if (loadPct < 0.6) congMult = 0.85; // 135 * 0.7 * 0.85 = ~80
-                else if (loadPct < 0.8) congMult = 0.95; // 135 * 0.8 ...
-                else congMult = 1.1;                    // Peak Burst
-
-                let flow = BASE_CAPACITY * timeMult * congMult;
-
-                // Peak check
-                if (timeMult > 0.9 && congMult > 1.0) return Math.min(150, Math.floor(flow));
-                return Math.max(20, Math.min(115, Math.floor(flow)));
-            }
-
-            function updateUI(now) {
-                if (viewContext === 'CITY') {
-                    let totalLoad = 0;
-                    Object.values(JUNCTIONS).forEach(j => totalLoad += (j.load / j.capacity));
-                    const avgLoad = totalLoad / 4;
-                    const flow = calculateFlow(avgLoad, now);
-
-                    document.getElementById('p-cong').innerText = Math.round(avgLoad * 100) + "%";
-                    document.getElementById('p-flow').innerText = flow * 4; // City sum
-                    document.getElementById('p-fuel').innerText = globalFuel.toFixed(1);
-                    document.getElementById('p-co2').innerText = globalCO2.toFixed(1);
-
-                    if (isEmergency) {
-                        document.getElementById('p-sub').innerText = "⚠ EMERGENCY PROTOCOL ACTIVE";
-                        document.getElementById('p-sub').style.color = "#ff4444";
-                        document.getElementById('alert-box').innerHTML = "<span style='color:#ff4444'>CORRIDOR CLEARED: NH66</span><br>CIVILIAN TRAFFIC HALTED.";
-                        document.getElementById('ai-text').innerHTML = "Priority Routing Active.<br>> 100% Green Phase lock on Corridor.<br>> Cross-traffic blocked.";
-                    } else {
-                        document.getElementById('p-sub').innerText = "NETWORK STATUS: NOMINAL";
-                        document.getElementById('p-sub').style.color = "#00bcd4";
-                        document.getElementById('alert-box').innerText = "Traffic flow within predicted parameters.";
-                        document.getElementById('ai-text').innerHTML = "AI Optimization Active.<br>> Signal phasing synced to Peak demand.<br>> Latency minimized.";
+                    if (App.isEmergency) {
+                        // Lateral Shift
+                        const edge = App.graph.edges.find(e => e.from === this.fromId && e.to === this.toId);
+                        if (edge.type === 'primary') {
+                            lat += 0.0001; lng += 0.0001; // Pull Over
+                        }
                     }
 
-                } else {
-                    const j = JUNCTIONS[viewContext];
-                    const pct = j.load / j.capacity;
-                    const flow = calculateFlow(pct, now);
-
-                    document.getElementById('p-cong').innerText = Math.round(pct * 100) + "%";
-                    document.getElementById('p-cong').style.color = pct > 0.6 ? '#ff4444' : '#e0e0e0';
-                    document.getElementById('p-flow').innerText = flow;
-                    document.getElementById('p-fuel').innerText = (globalFuel / 4).toFixed(1);
-                    document.getElementById('p-co2').innerText = (globalCO2 / 4).toFixed(1);
-
-                    const msgs = pct > 0.6
-                        ? ["Capacity Exceeded.", "Activating Overflow Buffers.", "Phase Extension: ON"]
-                        : ["Flow Optimal.", "Cycle: Standard.", "No Interruptions."];
-
-                    document.getElementById('ai-text').innerHTML = `Junction Analysis:<br>> ${msgs[0]}<br>> ${msgs[1]}`;
+                    const pt = map.latLngToContainerPoint([lat, lng]);
+                    ctx.fillStyle = this.color;
+                    ctx.beginPath();
+                    ctx.arc(pt.x, pt.y, 1.5, 0, Math.PI * 2);
+                    ctx.fill();
                 }
             }
 
-            // --- CONTROLS ---
-            function startLoops() {
-                requestAnimationFrame(updateSimulation);
-                setInterval(updateSystem, 1000);
+            // --- LOOP ---
+            let lastFrame = 0;
+            function startSimulation() {
+                if (App.engineRunning) return; // Prevent double start
+                App.engineRunning = true;
+                console.log("Starting Simulation Engine...");
+                requestAnimationFrame(loop);
+                setInterval(physicsTick, 1000);
             }
 
+            function loop(timestamp) {
+                if (!lastFrame) lastFrame = timestamp;
+                const dt = timestamp - lastFrame;
+                lastFrame = timestamp;
+                App.vehicles.forEach(v => v.update(dt));
+
+                // Keep vehicle count stable
+                if (App.vehicles.length < CONFIG.MAX_VEHICLES && Math.random() < 0.2) spawnVehicle();
+
+                renderVehicles();
+                requestAnimationFrame(loop);
+            }
+
+            function renderVehicles() {
+                if (!App.ctx) return;
+                const size = App.map.getSize();
+                App.ctx.clearRect(0, 0, size.x, size.y);
+                App.vehicles.forEach(v => v.draw(App.ctx, App.map));
+            }
+
+            function physicsTick() {
+                const now = new Date();
+                const dt = 1; // 1 second tick
+
+                Object.values(App.junctions).forEach(j => {
+                    updateJunctionPhysics(j, dt);
+                    updateStateMachine(j, dt);
+                    updateSignal(j);
+                    updateJunctionVisuals(j);
+                });
+
+                updateStats(now);
+                updateUI(now);
+            }
+
+            function updateJunctionPhysics(j, dt) {
+                // Conservation: Queue = Queue + Arrivals - Discharged
+                const SAT_FLOW = 2; // vehicles per second per lane
+                const LANES = 2;
+
+                // Discharge Model
+                let dischargeCapacity = 0;
+                if (App.isEmergency) {
+                    dischargeCapacity = 6 * dt; // Priority Corridor Boost
+                } else {
+                    dischargeCapacity = SAT_FLOW * LANES * dt;
+                }
+
+                // Clamp arrivals (max 8 per tick to prevent explosion)
+                let realArrivals = Math.min(j.arrivals, 8);
+                j.arrivals = 0; // Reset accumulator
+
+                // Calculate discharged
+                let actualDischarge = Math.min(j.queue, dischargeCapacity);
+                j.discharged += actualDischarge;
+
+                j.queue = Math.max(0, j.queue + realArrivals - actualDischarge);
+
+                // Metrics: Flow (veh/min)
+                const instFlow = actualDischarge * 60;
+                j.flowMetric = (j.flowMetric * 0.8) + (instFlow * 0.2); // Smoothing
+                j.flowMetric = Math.min(170, Math.max(40, j.flowMetric)); // Clamp 40-170
+            }
+
+            function updateStateMachine(j, dt) {
+                if (App.isEmergency) {
+                    j.state = 'EMERGENCY';
+                    j.diversionPct = 0;
+                    j.stateTimer = 0;
+                    return;
+                }
+
+                // Congestion Metric for Logic
+                const load = Math.min(100, Math.round((j.queue / j.capacity) * 100));
+
+                j.stateTimer += dt * 1000; // Accumulate Timer
+
+                if (j.state === 'DIVERTING') {
+                    if (load < 60) {
+                        // Exit Condition
+                        if (j.stateTimer > 20000) { // 20s
+                            j.state = 'OPTIMIZING';
+                            j.stateTimer = 0;
+                        }
+                    } else {
+                        j.stateTimer = 0; // Reset timer if load stays high
+                    }
+
+                    // Ramp
+                    if (load > 65) {
+                        const target = 15 + ((load - 70) / 25) * 25;
+                        const clampedTarget = Math.min(40, Math.max(15, target));
+                        j.diversionPct += (clampedTarget - j.diversionPct) * 0.05;
+                    } else {
+                        j.diversionPct = Math.max(0, j.diversionPct - 5);
+                    }
+
+                } else {
+                    // Logic: Normal -> High Load
+                    if (load > 75) {
+                        if (j.stateTimer > 15000) { // 15s hold
+                            j.state = 'DIVERTING';
+                            j.diversionPct = 15;
+                            j.stateTimer = 0;
+                        }
+                    } else if (load > 60) {
+                        j.state = 'OPTIMIZING';
+                        // Keep timer running for potential divert escalation
+                    } else {
+                        j.state = 'NORMAL';
+                        j.diversionPct = 0;
+                        j.stateTimer = 0;
+                    }
+                }
+            }
+
+            function updateSignal(j) {
+                if (App.isEmergency) {
+                    j.activePhase = 0; // Force Phase 0
+                    updateSignalUI(j);
+                    return;
+                }
+
+                const now = Date.now();
+                let cycle = 3000;
+                if (j.state === 'OPTIMIZING') cycle = 5000;
+
+                if (now - j.lastSwitch > cycle) {
+                    j.activePhase = (j.activePhase + 1) % 4;
+                    j.lastSwitch = now;
+                    updateSignalUI(j);
+                }
+            }
+
+            function updateSignalUI(j) {
+                const id = Object.keys(App.junctions).find(k => App.junctions[k] === j);
+                if (!id) return;
+
+                [0, 1, 2, 3].forEach(i => {
+                    const el = document.getElementById(`sl-${id}-${i}`);
+                    if (el) el.className = (i === j.activePhase) ? 'sig-light sl-green' : 'sig-light sl-red';
+                });
+            }
+
+            function updateJunctionVisuals(j) {
+                const id = Object.keys(App.junctions).find(k => App.junctions[k] === j);
+                const heat = document.getElementById(`heat-${id}`);
+                const float = document.getElementById(`flo-${id}`);
+                const pct = (j.queue / j.capacity) * 100;
+
+                // Heat
+                if (heat) {
+                    heat.style.display = pct > 40 ? 'block' : 'none';
+                    heat.style.background = pct > 70 ? 'radial-gradient(circle, rgba(255,0,0,0.8) 0%, transparent 70%)' : 'radial-gradient(circle, rgba(255,100,0,0.4) 0%, transparent 70%)';
+                }
+
+                // Floating Label
+                if (float) {
+                    if (j.state === 'DIVERTING') {
+                        float.style.display = 'block';
+                        float.innerHTML = `Action: Diverting ${Math.round(j.diversionPct)}%<br>Cause: High Load`;
+                        float.style.borderColor = '#00ffff';
+                        float.style.color = '#00ffff';
+                    } else if (j.state === 'OPTIMIZING') {
+                        float.style.display = 'block';
+                        float.innerHTML = `OPTIMIZING`;
+                        float.style.borderColor = '#ffbb33';
+                        float.style.color = '#ffbb33';
+                    } else {
+                        float.style.display = 'none';
+                    }
+                }
+            }
+
+            function updateStats(now) {
+                App.stats.time = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                // Cumulative
+                App.stats.fuel += 0.5 * App.simSpeed;
+                App.stats.co2 += 0.8 * App.simSpeed;
+            }
+
+            function updateUI(now) {
+                // HELPER: Crash-proof DOM wiring
+                const setText = (id, val) => { const el = document.getElementById(id); if (el) el.innerText = val; };
+                const setHTML = (id, val) => { const el = document.getElementById(id); if (el) el.innerHTML = val; };
+
+                setText('g-time', App.stats.time);
+
+                // --- DATA GATHERING ---
+                const activeVehicles = App.vehicles.length;
+                let totalDemand = 0;
+                let totalCongestion = 0;
+                let totalFlow = 0;
+                const jKeys = Object.keys(App.junctions);
+
+                jKeys.forEach(key => {
+                    const j = App.junctions[key];
+                    totalDemand += j.queue;
+                    // Congestion: (Queue / Capacity) * 100
+                    const jCong = (j.queue / j.capacity) * 100;
+                    totalCongestion += Math.min(100, jCong);
+                    totalFlow += j.flowMetric;
+                });
+
+                // City Averages (Average of %s)
+                const cityCongestion = jKeys.length > 0 ? totalCongestion / jKeys.length : 0;
+
+                // --- ENVIRONMENT ---
+                const hr = now.getHours();
+                const isDay = (hr >= 6 && hr <= 18);
+                const isPeak = (hr >= 8 && hr <= 10) || (hr >= 17 && hr <= 19);
+
+                let tempBase = isDay ? CONFIG.ENVIRONMENT.TEMP_BASE_DAY : CONFIG.ENVIRONMENT.TEMP_BASE_NIGHT;
+                if (isPeak) tempBase += 2;
+                tempBase += 3 * (cityCongestion / 100);
+
+                let aqiBase = CONFIG.ENVIRONMENT.AQI_BASE;
+                if (isPeak) aqiBase += CONFIG.ENVIRONMENT.AQI_PEAK_OFFSET;
+                aqiBase += 30 * (cityCongestion / 100);
+
+                setText('g-temp', tempBase.toFixed(1) + "°C");
+                setText('g-aqi', "AQI " + Math.round(aqiBase));
+
+                if (App.context === 'CITY') {
+                    // CITY VIEW
+                    setText('p-title', "KOCHI METROPOLIS");
+                    setText('p-cong', Math.round(cityCongestion) + "%");
+
+                    const flowLbl = document.querySelector('#p-flow + .c-lbl');
+                    if (flowLbl) flowLbl.innerText = "ACTIVE VEHICLES";
+
+                    setText('p-flow', activeVehicles);
+                    setText('p-demand', Math.round(totalDemand));
+
+                    setText('p-fuel', App.stats.fuel.toFixed(1));
+                    setText('p-co2', App.stats.co2.toFixed(1));
+
+                    if (App.isEmergency) {
+                        setHTML('alert-box', "<span style='color:red'>🚑 GREEN CORRIDOR ACTIVE</span>");
+                        setHTML('ai-text', "PROTOCOL: EMERGENCY<br>> Signals Locked<br>> Priority Corridor Active<br>> Civil Traffic Yielding");
+                    } else {
+                        setHTML('alert-box', "System Status: <span style='color:#00C851'>ONLINE</span>");
+                        setHTML('ai-text', "AI STATUS: SCANNING<br>> Optimizing Phase Cycles");
+                    }
+
+                } else {
+                    // JUNCTION VIEW
+                    const j = App.junctions[App.context];
+                    if (j) {
+                        const jCong = Math.min(100, Math.round((j.queue / j.capacity) * 100));
+                        setText('p-cong', jCong + "%");
+
+                        const flowLbl = document.querySelector('#p-flow + .c-lbl');
+                        if (flowLbl) flowLbl.innerText = "FLOW (veh/min)";
+
+                        setText('p-flow', Math.round(j.flowMetric));
+                        setText('p-demand', Math.round(j.queue));
+
+                        setText('p-fuel', (App.stats.fuel / jKeys.length).toFixed(1));
+                        setText('p-co2', (App.stats.co2 / jKeys.length).toFixed(1));
+
+                        let color = '#00C851';
+                        if (j.state === 'OPTIMIZING') color = '#ffbb33';
+                        if (j.state === 'DIVERTING') color = '#00ffff';
+                        if (j.state === 'EMERGENCY') color = '#ff4444';
+
+                        setHTML('alert-box', `AI MODE: <span style="color:${color};font-weight:bold">${j.state}</span>`);
+
+                        if (App.isEmergency) {
+                            setHTML('ai-text', "PROTOCOL: EMERGENCY<br>> Signals Locked<br>> Priority Corridor Active<br>> Civil Traffic Yielding");
+                        } else if (j.state === 'DIVERTING') {
+                            setHTML('ai-text', `Analysis:<br>> Timer: ${Math.round(j.stateTimer / 1000)}s<br>> Action: Diverting ${Math.round(j.diversionPct)}%<br>> Impact: Congestion Decreasing`);
+                        } else if (j.state === 'OPTIMIZING') {
+                            setHTML('ai-text', `Analysis:<br>> Load Rising<br>> Action: Signal Optimization<br>> Impact: Stabilization`);
+                        } else {
+                            setHTML('ai-text', `Analysis:<br>> Physics: Stable<br>> Queue: ${Math.round(j.queue)} veh`);
+                        }
+                    }
+                }
+            }
+
+            // --- HELPERS ---
+            function getRoadColor(type) {
+                switch (type) {
+                    case 'primary': return '#00bcd4';
+                    case 'secondary': return '#ffffff';
+                    case 'tertiary': return '#555';
+                    default: return '#555';
+                }
+            }
+
+            function spawnVehicle() { App.vehicles.push(new Vehicle()); }
+
             window.setView = function (ctx) {
-                viewContext = ctx;
+                // UI LOCK: Only allow CITY or Control Junctions
+                if (ctx !== 'CITY' && !CONFIG.CONTROL_JUNCTIONS.includes(ctx)) return;
+
+                App.context = ctx;
                 document.querySelectorAll('.sel-btn').forEach(b => b.classList.remove('active'));
-                document.getElementById(`btn-${ctx}`).classList.add('active');
+                const btn = document.getElementById(`btn-${ctx}`);
+                if (btn) btn.classList.add('active');
 
                 if (ctx === 'CITY') {
-                    map.flyTo([10.0000, 76.3200], 13);
-                    document.getElementById('p-title').innerText = "KOCHI CITY";
-                    document.getElementById('p-detail').innerText = "Network Overview";
-                } else {
-                    map.flyTo([JUNCTIONS[ctx].lat, JUNCTIONS[ctx].lng], 15);
-                    document.getElementById('p-title').innerText = ctx.toUpperCase();
-                    document.getElementById('p-detail').innerText = `ID: ${ctx.substring(0, 3).toUpperCase()}-NODE`;
+                    App.map.flyTo([9.9950, 76.3100], 13);
+                } else if (App.junctions[ctx]) {
+                    const j = App.junctions[ctx];
+                    App.map.flyTo([j.lat, j.lng], 16, { duration: 1.5 });
+                    document.getElementById('p-title').innerText = j.name.toUpperCase();
                 }
                 updateUI(new Date());
             }
 
             window.setSpeed = function (s) {
-                simSpeed = s;
+                App.simSpeed = s;
                 document.querySelectorAll('.ctrl-btn').forEach(b => { if (b.id !== 'btn-emer') b.classList.remove('active'); });
-                if (s <= 10) document.getElementById(`spd-${s}`).classList.add('active');
+                document.getElementById(`spd-${s}`).classList.add('active');
             }
 
             window.toggleEmergency = function () {
-                isEmergency = !isEmergency;
+                App.isEmergency = !App.isEmergency;
                 const btn = document.getElementById('btn-emer');
-                if (isEmergency) btn.classList.add('active'); else btn.classList.remove('active');
+                if (App.isEmergency) {
+                    btn.classList.add('active');
+                    // VISUAL: Red Tint
+                    document.body.style.transition = "filter 1s";
+                    document.body.style.filter = "sepia(0.5) hue-rotate(-50deg) saturate(2)";
+                } else {
+                    btn.classList.remove('active');
+                    document.body.style.filter = "none";
+                }
                 updateUI(new Date());
             }
 
